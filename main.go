@@ -39,7 +39,7 @@ func usage() {
 	fmt.Printf(displayfmt, "  --sortby", "sort by ", utils.PrintValidSorts)
 	fmt.Printf(displayfmt, "  --filternodes", "filter based on node name")
 	fmt.Printf(displayfmt, "  --filtercolor", "filter based on color category <30 Green, >30 <70 Orange, >70 Red")
-	fmt.Printf(displayfmt, "  --filterlabels", "filter based on labels")
+	fmt.Printf(displayfmt, "  --filterlabels", "filter based on labels, ie. \"beta.kubernetes.io/instance-type=m6idn.large,beta.kubernetes.io/os=linux\" ")
 	fmt.Printf(displayfmt, "  --desc", "to enable reverse sort")
 	fmt.Printf(displayfmt, "  --debug", "enable debug mode")
 	fmt.Printf(displayfmt, "  --metrics", "choose which metrics", utils.PrintValidMetrics())
@@ -178,8 +178,35 @@ func FilterForNode(m model) []k8s.Node {
 
 func FilterForLabel(m model) []k8s.Node {
 	var filteredNodes []k8s.Node
-	FilterLabelInput := strings.Split(m.args.filternodes, ",")
-	utils.Logger.Debug("Filter For Node results", FilterLabelInput)
+	filterLabelInput := strings.Split(m.args.filterlabels, ",") // Split the input into key-value pairs
+
+	for _, node := range m.nodestats {
+		matchesFilter := true
+		for _, filter := range filterLabelInput {
+			keyVal := strings.Split(filter, "=")
+			// One label should consist of `key=value`.
+			if len(keyVal) != 2 {
+				utils.Logger.Errorf("Invalid label filter format, check usage via `--help` switch, Exiting")
+				os.Exit(1)
+			}
+
+			// Validate if label is in `key=value` format.
+			labelKey, labelValue := keyVal[0], keyVal[1]
+			if labelKey == "" {
+				utils.Logger.Errorf("Label key can't be empty, Exiting")
+				os.Exit(1)
+			}
+
+			// Check if the filter label is present on the Node and if the value matches.
+			if value, ok := node.Labels[labelKey]; !ok || value != labelValue {
+				matchesFilter = false
+				break
+			}
+		}
+		if matchesFilter {
+			filteredNodes = append(filteredNodes, node)
+		}
+	}
 	return filteredNodes
 }
 
@@ -264,10 +291,10 @@ func MetricsHandler(m model, output *strings.Builder) {
 	format := "%-" + strconv.Itoa(maxNameWidth) + "s %-12s %-12s %s\n"
 
 	// Header and Version info
-	
+
 	fmt.Fprint(output, "\n# KubeNodeUsage\n# Version: 3.0.1\n# https://github.com/AKSarav/Kube-Node-Usage\n\n")
 
-	fmt.Fprint(output, "\n# Context: ",m.clusterinfo.Context,"\n# Version: ",m.clusterinfo.Version,"\n# URL: ",m.clusterinfo.URL,"\n\n")
+	fmt.Fprint(output, "\n# Context: ", m.clusterinfo.Context, "\n# Version: ", m.clusterinfo.Version, "\n# URL: ", m.clusterinfo.URL, "\n\n")
 
 	if m.args.metrics == "memory" {
 		fmt.Fprint(output, "Memory Metrics\n\n")
@@ -415,7 +442,7 @@ func main() {
 	mdl.args = &args
 	mdl.clusterinfo = k8s.ClusterInfo()
 	mdl.nodestats = k8s.Nodes(metrics)
-	
+
 	if _, err := tea.NewProgram(mdl).Run(); err != nil {
 		fmt.Println("Oh no!", err)
 		os.Exit(1)
@@ -428,8 +455,8 @@ type tickMsg time.Time
 // model is the Bubble Tea model.
 type model struct {
 	clusterinfo k8s.Cluster
-	nodestats []k8s.Node
-	args      *Inputs
+	nodestats   []k8s.Node
+	args        *Inputs
 }
 
 // Init Bubble Tea model
